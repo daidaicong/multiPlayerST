@@ -38,6 +38,28 @@ $(function () {
         myNickname = inputName;
         initWebSocket();
     });
+
+    // 监听角色和预设变化，仅对主机生效,后续可增加更多变化的监听
+    {
+        eventSource.on(event_types.CHAT_CHANGED, function() 
+        {
+            if (myNickname === MASTER_NICKNAME) {
+                // 延迟执行，确保状态已经更新
+                setTimeout(() => {
+                    onRequestState();
+                }, 300);
+            }
+        });
+
+        eventSource.on(event_types.PRESET_CHANGED, function() {
+            if (myNickname === MASTER_NICKNAME) {
+                // 延迟执行，确保状态已经更新
+                setTimeout(() => {
+                    onRequestState();
+                }, 300);
+            }
+        });
+    }
 });
 
 function loadSocketIO() {
@@ -96,6 +118,17 @@ function initWebSocket() {
         if (myNickname !== MASTER_NICKNAME) renderStreamingMessage(data.fullText);
     });
 
+    socket.on("request_master_state", () => {
+        if (myNickname === MASTER_NICKNAME) onRequestState();
+        //onRequestState发送状态给服务端
+    });
+    socket.on("sync_states", (state) => {
+        //通常是客户端接受回调,主机不管
+        if(myNickname !== MASTER_NICKNAME) onSyncMasterState(state);
+
+    });
+
+
     socket.on("generation_finished", () => {
         isReady = false;
         $("#send_but").css("background", "");
@@ -104,6 +137,8 @@ function initWebSocket() {
     });
 }
 
+
+//只有房主会用到
 function activateInterception() {
     if (myNickname === MASTER_NICKNAME) return;
 
@@ -123,7 +158,7 @@ function activateInterception() {
         socket.emit("submit_ready", { text, isReady });
         $sendBtn.css("background", isReady ? "rgba(0, 255, 0, 0.4)" : "");
     });
-    
+
     //  拦截回车发送
     $textarea.off("keydown.coop").on("keydown.coop", function (e) {
         // 检查是否是Enter键且没有按下Ctrl或Shift（SillyTavern通常是Ctrl+Enter换行）
@@ -145,7 +180,7 @@ function activateInterception() {
     });
 }
 
-// 3. 消息处理
+// 消息处理
 function handleMasterSend(prompt) 
 {
     $("#send_textarea").val(prompt).trigger("input");
@@ -201,6 +236,7 @@ function renderStreamingMessage(text)
     scrollChatToBottom();
 }
 
+//拖动UI，小功能
 /**
  * 通用拖拽函数
  * @param {JQuery} $panel - 整个悬浮窗对象
@@ -255,4 +291,67 @@ function makeDraggable($panel, $handle) {
         const { top, left } = JSON.parse(savedPos);
         $panel.css({ top, left, right: 'auto' });
     }
+}
+
+// 获取前端当前角色卡，预设
+// 通知服务端的
+function onRequestState()
+{
+    const context = SillyTavern.getContext();
+    const presetManager = context.getPresetManager();
+    const state = {
+        characterId: context.characterId,
+        presetName: presetManager.getSelectedPresetName(), 
+        timestamp: Date.now()
+    };
+    socket.emit("sync_state", state);
+}
+
+
+/**
+ * 同步主节点状态到当前客户端
+ * 该函数负责根据主节点传来的状态信息，更新当前客户端的角色和预设设置
+ * 
+ * state - 包含同步状态的对象
+ * state.characterId - 要切换到的角色ID
+ * state.presetName - 要切换到的预设名称
+ */
+function onSyncMasterState(state)
+{
+    const context = SillyTavern.getContext();
+    // 检查是否已经是该角色，避免重复加载
+    serverDebug("test");
+    if (context.characterId !== state.characterId) {
+        context.selectCharacterById(state.characterId);
+    }
+    
+    serverDebug(state.presetName);
+    //JQuery 选择器
+    const $select = $('#settings_preset_openai');
+    const targetName = state.presetName;
+    // 检查下拉框是否存在
+    if ($select.length === 0) {
+        serverDebug("错误：找不到 #settings_preset_openai 下拉框");
+        return;
+    }
+    // 遍历选项，按"文字内容"匹配
+    const $option = $select.find('option').filter(function() {
+        return $(this).text().trim() === targetName.trim();
+    });
+
+    if ($option.length > 0) {
+        const val = $option.val();
+        // 选中并触发酒馆原生的切换逻辑
+        $select.val(val).trigger('change');
+        serverDebug(`同步成功：已切换对话预设至 [${targetName}]`);
+    } else {
+        // 如果找不到，打印当前前 5 个选项，帮你排查是否存在名称差异
+        const available = $select.find('option').slice(0, 5).map((i, el) => $(el).text()).get();
+        serverDebug(`同步失败 Slave 端没找到预设 [${targetName}]。当前可用示例: ${available.join(', ')}`);
+    }
+}
+
+function serverDebug(info)
+{
+    socket.emit("debug", info);
 }
