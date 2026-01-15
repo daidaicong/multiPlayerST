@@ -1,0 +1,12 @@
+{
+    "display_name": "多人协作",
+    "loading_order": 7,
+    "requires": [],
+    "optional": [
+    ],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "DAVC",
+    "version": "0.1",
+    "homePage": "https://github.com/SillyTavern/SillyTavern"
+}

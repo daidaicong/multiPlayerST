@@ -1,0 +1,69 @@
+#coop-panel {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    width: 200px;
+    background: rgba(25, 25, 25, 0.9);
+    backdrop-filter: blur(10px);
+    border: 1px solid #444;
+    border-radius: 10px;
+    z-index: 9999;
+    padding: 15px;
+    color: white;
+    font-size: 14px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    user-select: none; /* 防止拖动时选中文字 */
+}
+
+/* 标题栏作为拖动把手 */
+.coop-title {
+    cursor: move; /* 鼠标悬停显示移动图标 */
+    font-weight: bold;
+    border-bottom: 1px solid #444;
+    margin-bottom: 10px;
+    padding-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+    background: rgba(255, 255, 255, 0.05); /* 稍微亮一点，标识这是把手 */
+}
+
+#coop-name-input {
+    width: 100%;
+    background: #111;
+    border: 1px solid #555;
+    color: white;
+    padding: 5px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}
+
+#coop-connect-btn {
+    width: 100%;
+    background: #4a90e2;
+    border: none;
+    color: white;
+    padding: 6px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#coop-connect-btn:disabled {
+    background: #2d4a3e;
+    cursor: not-allowed;
+}
+
+.player-list {
+    margin-top: 10px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.player-item {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.status-ready { color: #00ff00; font-weight: bold; }
+.status-wait { color: #888; }
