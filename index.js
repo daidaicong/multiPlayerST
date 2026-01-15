@@ -86,7 +86,7 @@ function injectHTML() {
     $('body').append(html);
 }
 
-// 2. WebSocket 与 拦截激活
+// 2. WebSocket 与 拦截激活，绑定各种和服务端交互的回调函数
 function initWebSocket() {
     // @ts-ignore
     socket = window['io'](WS_URL);
@@ -179,6 +179,22 @@ function activateInterception() {
         }
     });
 }
+/*获取房主前端当前角色卡，预设
+ 通知房主的，房主才会调用
+ */
+function onRequestState()
+{
+    const context = SillyTavern.getContext();
+    const presetManager = context.getPresetManager();
+    const state = {
+        characterId: context.characterId,
+        presetName: presetManager.getSelectedPresetName(), 
+        timestamp: Date.now()
+    };
+    socket.emit("sync_state", state);
+}
+
+
 
 // 消息处理
 function handleMasterSend(prompt) 
@@ -211,6 +227,7 @@ function handleMasterSend(prompt)
     }, 500);
 }
 
+// 客户端的Msg重绘
 function renderStreamingMessage(text) 
 {
     // 创建新的AI回复消息（与前面的合作输入消息交替）
@@ -236,7 +253,51 @@ function renderStreamingMessage(text)
     scrollChatToBottom();
 }
 
-//拖动UI，小功能
+/**
+ * 同步主节点状态到当前客户端，只有客户端会调用
+ * 该函数负责根据主节点传来的状态信息，更新当前客户端的角色和预设设置
+ * 
+ * state - 包含同步状态的对象
+ * state.characterId - 要切换到的角色ID
+ * state.presetName - 要切换到的预设名称
+ */
+function onSyncMasterState(state)
+{
+    const context = SillyTavern.getContext();
+    // 检查是否已经是该角色，避免重复加载
+    serverDebug("test");
+    if (context.characterId !== state.characterId) {
+        context.selectCharacterById(state.characterId);
+    }
+    
+    serverDebug(state.presetName);
+    //JQuery 选择器
+    const $select = $('#settings_preset_openai');
+    const targetName = state.presetName;
+    // 检查下拉框是否存在
+    if ($select.length === 0) {
+        serverDebug("错误：找不到 #settings_preset_openai 下拉框");
+        return;
+    }
+    // 遍历选项，按"文字内容"匹配
+    const $option = $select.find('option').filter(function() {
+        return $(this).text().trim() === targetName.trim();
+    });
+
+    if ($option.length > 0) {
+        const val = $option.val();
+        // 选中并触发酒馆原生的切换逻辑
+        $select.val(val).trigger('change');
+        serverDebug(`同步成功：已切换对话预设至 [${targetName}]`);
+    } else {
+        // 如果找不到，打印当前前 5 个选项，帮你排查是否存在名称差异
+        const available = $select.find('option').slice(0, 5).map((i, el) => $(el).text()).get();
+        serverDebug(`同步失败 Slave 端没找到预设 [${targetName}]。当前可用示例: ${available.join(', ')}`);
+    }
+}
+
+
+//拖动插件的UI，小功能
 /**
  * 通用拖拽函数
  * @param {JQuery} $panel - 整个悬浮窗对象
@@ -292,65 +353,6 @@ function makeDraggable($panel, $handle) {
         $panel.css({ top, left, right: 'auto' });
     }
 }
-
-// 获取前端当前角色卡，预设
-// 通知服务端的
-function onRequestState()
-{
-    const context = SillyTavern.getContext();
-    const presetManager = context.getPresetManager();
-    const state = {
-        characterId: context.characterId,
-        presetName: presetManager.getSelectedPresetName(), 
-        timestamp: Date.now()
-    };
-    socket.emit("sync_state", state);
-}
-
-
-/**
- * 同步主节点状态到当前客户端
- * 该函数负责根据主节点传来的状态信息，更新当前客户端的角色和预设设置
- * 
- * state - 包含同步状态的对象
- * state.characterId - 要切换到的角色ID
- * state.presetName - 要切换到的预设名称
- */
-function onSyncMasterState(state)
-{
-    const context = SillyTavern.getContext();
-    // 检查是否已经是该角色，避免重复加载
-    serverDebug("test");
-    if (context.characterId !== state.characterId) {
-        context.selectCharacterById(state.characterId);
-    }
-    
-    serverDebug(state.presetName);
-    //JQuery 选择器
-    const $select = $('#settings_preset_openai');
-    const targetName = state.presetName;
-    // 检查下拉框是否存在
-    if ($select.length === 0) {
-        serverDebug("错误：找不到 #settings_preset_openai 下拉框");
-        return;
-    }
-    // 遍历选项，按"文字内容"匹配
-    const $option = $select.find('option').filter(function() {
-        return $(this).text().trim() === targetName.trim();
-    });
-
-    if ($option.length > 0) {
-        const val = $option.val();
-        // 选中并触发酒馆原生的切换逻辑
-        $select.val(val).trigger('change');
-        serverDebug(`同步成功：已切换对话预设至 [${targetName}]`);
-    } else {
-        // 如果找不到，打印当前前 5 个选项，帮你排查是否存在名称差异
-        const available = $select.find('option').slice(0, 5).map((i, el) => $(el).text()).get();
-        serverDebug(`同步失败 Slave 端没找到预设 [${targetName}]。当前可用示例: ${available.join(', ')}`);
-    }
-}
-
 function serverDebug(info)
 {
     socket.emit("debug", info);
