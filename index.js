@@ -6,7 +6,9 @@ import {
     eventSource,
     event_types,
     characters,
-    this_chid
+    this_chid,
+    converter,
+    messageFormatting
 } from "../../../script.js";
 
 const WS_URL = "http://localhost:8001";
@@ -165,12 +167,19 @@ function initWebSocket() {
         $('#coop-gen-info').text(data.masterOnline ? "房主已在线" : "等待房主上线...");
     });
 
-    socket.on("trigger_send", (data) => {
-        if (myNickname === MASTER_NICKNAME) handleMasterSend(data.prompt);
+    socket.on("trigger_send", (data) => 
+    {
+        //serverDebug("触发发送消息"+myNickname + " : "+data);
+        if (myNickname === MASTER_NICKNAME) {
+            handleMasterSend(data);
+        }
+        else{
+            renderSendMessage(data);
+        }
     });
 
     socket.on("stream_update", (data) => {
-        if (myNickname !== MASTER_NICKNAME) renderStreamingMessage(data.fullText);
+        if (myNickname !== MASTER_NICKNAME) renderStreamingMessage(data);
     });
 
     socket.on("request_master_state", () => {
@@ -186,12 +195,15 @@ function initWebSocket() {
 
     socket.on("generation_finished", () => {
         isReady = false;
+        //eventSource.emit(event_types.MESSAGE_RECEIVED, chat.length-1, 'coop');
+
         $("#send_but").css("background", "");
         if (myNickname !== MASTER_NICKNAME) $("#send_textarea").val("").trigger("input");
-        saveChat();
+        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, chat.length - 1);
+        if(myNickname === MASTER_NICKNAME)
+            saveChat();
     });
 }
-
 
 
 // 定义为命名函数，以便 removeEventListener 可以引用
@@ -276,60 +288,116 @@ function onRequestState()
 }
 
 // 消息处理
-function handleMasterSend(prompt) 
-{
-    //合并上Fix提示词
+function handleMasterSend(prompt) {
+    const roundId = "coop_" + Date.now(); // 生成本轮唯一的ID
+    
+    // 1. 发送指令
     $("#send_textarea").val(prompt + "\n<extraPromot> " + g_fixAddPrompt + " \n</extraPromot>").trigger("input");
-    $("#send_but").trigger("click"); // 触发 ST 原生发送
+    $("#send_but").trigger("click");
 
-    let lastSentText = ""; // 记录上次发送的文本，避免重复发送
+    let lastSentLength = 0; 
 
-    const observer = new MutationObserver(() => {
-        const $lastMes = $(".mes.last_mes .mes_text").last();
-        if ($lastMes.length > 0) {
-            const text = $lastMes.text();
-            // 过滤掉 "…" 或其他占位符内容
-            if (text && text !== lastSentText && text.trim() !== '…' && text.trim() !== '') {
-                //console.log("[UI_Debug MultiUserCoop] 房主获取到完整消息：", text);
-                lastSentText = text;
-                socket.emit("stream_data", { fullText: text });
+    // 2. 使用定时器轮询内部 chat 数组，而不是监听 DOM
+    const streamSyncTimer = setInterval(() => {
+        const lastMsg = chat[chat.length - 1];
+        
+        // 确保抓取的是 AI 正在生成的这条消息
+        if (lastMsg && !lastMsg.is_user) {
+            const currentRawText = lastMsg.mes; // 直接获取原始 Markdown 文本
+
+            // 只有当内容长度增加时才发送，减少同步频率
+            if (currentRawText && currentRawText.length > lastSentLength) {
+                lastSentLength = currentRawText.length;
+                
+                socket.emit("stream_data", { 
+                    roundId: roundId, 
+                    fullText: currentRawText 
+                });
             }
         }
-    });
-    observer.observe(document.getElementById("chat"), { childList: true, subtree: true, characterData: true });
 
-    const endCheck = setInterval(() => {
+        // 3. 停止判定：当发送按钮重新变为可见，且没有停止按钮时
         if ($("#send_but").is(":visible") && !$(".st-stop-button").length) {
             socket.emit("stream_end");
-            observer.disconnect();
-            clearInterval(endCheck);
+            clearInterval(streamSyncTimer);
+            console.log("[Coop] 本轮流式传输结束");
         }
-    }, 500);
+    }, 400); // 400ms 同步一次，非常丝滑
 }
 
-// 客户端的Msg重绘
-function renderStreamingMessage(text) 
+// 在全局定义一个变量记录当前正在处理的消息楼层 ID
+let lastProcessedRoundId = null;
+// 玩家收到房主分发的AI消息，重绘
+function renderStreamingMessage(data) {
+    const { roundId, fullText } = data;
+    //serverDebug(data);
+    if (lastProcessedRoundId === roundId) {
+        // --- A. 更新模式：找到刚才那层楼，换掉文字 ---
+        // 1. 更新内存数据
+        const lastIdx = chat.length - 1;
+        chat[lastIdx].mes = fullText;
+
+        // 2. 更新 UI
+        // 找到最后一条带 coop 标记的消息文本框
+        const $targetMsg = $(".mes[data-coop-id='" + roundId + "']").find(".mes_text");
+        
+        if ($targetMsg.length > 0) {
+            // 使用 ST 内置的 Markdown 渲染器（如果有的话）或者直接填入文本
+            // 如果你希望玩家端也能美化，可以调用 ST 的渲染函数：
+            const characterName = characters[this_chid]?.name || "AI";
+            const formattedContent = messageFormatting(fullText, characterName, false, false, lastIdx);
+            $targetMsg.html(formattedContent);
+            eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, lastIdx);
+            // $targetMsg.text(fullText); 
+        }
+
+    } else {
+        // --- B. 新建模式：第一次收到这个 ID 的数据 ---
+        lastProcessedRoundId = roundId;
+
+        const characterName = characters[this_chid]?.name || "AI";
+        const formattedContent = messageFormatting(fullText, characterName, false, false, chat.length);
+        const aiMessage = {
+            name: characters[this_chid]?.name || "AI",
+            is_user: false,
+            mes: formattedContent,
+            extra: { 
+                is_coop: true, 
+                type: 'coop_ai_response' 
+            }
+        };
+
+        chat.push(aiMessage);
+        addOneMessage(aiMessage); // ST 的原生函数
+
+        //eventSource.emit(event_types.MESSAGE_RECEIVED, chat.length-1, 'coop');
+        // 给新创建的 DOM 元素打上 ID 标记，方便下次查找
+        $(".mes").last().attr("data-coop-id", roundId);
+    }
+
+    scrollChatToBottom();
+}
+
+// 玩家收到房主发来的"共同发送消息"，重绘
+function renderSendMessage(data) 
 {
-    // 创建新的AI回复消息（与前面的合作输入消息交替）
-    const aiMessage = {
-        name: characters[this_chid]?.name || "AI",  // 使用当前角色名
-        is_user: false,  // 标记为AI消息
-        send_date: new Date().toLocaleString(), // 添加时间戳
-        mes: text,
-        extra: { 
-            is_coop: true,  // 标记为合作消息
-            type: 'coop_ai_response' 
+    // 添加玩家联合输入的消息
+    const playersPromot = data + "\n<extraPromot> " + g_fixAddPrompt + " \n</extraPromot>"
+    serverDebug("Hoke: " + playersPromot);
+    const combinedUserMessage = {
+        name: "Players",
+        is_user: true,
+        mes: playersPromot,
+        extra: 
+        { 
+            is_coop: true, 
+            type: 'coop_user_input' 
         }
     };
-    
-    // 添加AI回复消息到聊天历史
-    chat.push(aiMessage);
-    const newMessageIndex = chat.length - 1;
-    addOneMessage(aiMessage);
-    
-    // 触发 ST 事件
-    eventSource.emit(event_types.MESSAGE_RECEIVED, newMessageIndex, 'coop');
-    
+
+    chat.push(combinedUserMessage);
+    addOneMessage(combinedUserMessage); 
+    eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, chat.length-1);
     scrollChatToBottom();
 }
 
