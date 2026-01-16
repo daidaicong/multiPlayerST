@@ -89,7 +89,7 @@ $(function () {
         localStorage.setItem(PROMPT_STORAGE_KEY, newVal);
         serverDebug("提示词已保存:" + newVal);
     });
-    // 监听角色和预设变化，仅对主机生效,后续可增加更多变化的监听
+    // 监听角色和预设变化 删除消息变化，仅对主机生效,后续可增加更多变化的监听
     {
         eventSource.on(event_types.CHAT_CHANGED, function() 
         {
@@ -106,6 +106,17 @@ $(function () {
                 // 延迟执行，确保状态已经更新
                 setTimeout(() => {
                     onRequestState();
+                }, 300);
+            }
+        });
+
+        // 添加删除消息事件监听
+        eventSource.on(event_types.MESSAGE_DELETED, async function(newLength) {
+            if (myNickname === MASTER_NICKNAME) {
+                // 房主删除消息时，广播删除事件
+                // 该事件带的参数你删除的那一楼的index
+                setTimeout(() => {
+                    socket.emit("delete_message_sync",newLength);
                 }, 300);
             }
         });
@@ -191,6 +202,9 @@ function initWebSocket() {
         //通常是客户端接受回调,主机不管
         if(myNickname !== MASTER_NICKNAME) onSyncMasterState(state);
 
+    });
+    socket.on("players_delete_message", (newLength) => {
+        if (myNickname !== MASTER_NICKNAME) onSyncDeleteMessage(newLength);
     });
 
 
@@ -468,7 +482,45 @@ function onSyncMasterState(state)
     }
 }
 
+/**
+ * 同步删除/截断消息
+ * @param {number} newLength - 新的消息列表长度 (保留 0 到 newLength-1，删除 newLength 及之后的所有消息)
+ */
+async function onSyncDeleteMessage(newLength) {
+    // 1. 获取 ST 上下文
+    const context = SillyTavern.getContext();
+    const chat = context.chat; // 当前的聊天记录数组
 
+    // 安全检查
+    if (!chat || newLength < 0 || newLength >= chat.length) {
+        serverDebug("同步删除：无需删除或长度无效");
+        return;
+    }
+
+    serverDebug(`[Sync] 正在将消息从 ${chat.length} 截断至 ${newLength}`);
+
+    // 2. 倒序处理要删除的消息 (处理 DOM 和 事件)
+    // 必须倒序，虽然在这里因为我们是截断没所谓，但符合逻辑习惯
+    for (let i = chat.length - 1; i >= newLength; i--) {
+        // A. 移除前端 DOM 元素 (视觉上立即消失)
+        // ST 的消息容器通常带有 mesid 属性，对应 chat 数组的 index
+        $(`div[mesid="${i}"]`).remove();
+
+        // B. 触发 ST 内部事件 'message_deleted'
+        // 这一步至关重要！如果不触发，其他的插件（如 Slash Runner）可能不知道消息没了，
+        // 导致它们渲染的血条/状态栏还悬浮在空中或报错。
+        //context.eventSource.emit('message_deleted', i);
+    }
+    // 3. 核心数据截断
+    // 直接修改数组长度是 JS 中最高效的截断方式
+    chat.length = newLength;
+    context.eventSource.emit(event_types.MESSAGE_DELETED, newLength);
+    // 4. 保存更改到硬盘
+    // 注意：一定要放在循环外面只调用一次！
+    // 如果在循环里调 saveChat，绝对会再次报你刚才遇到的 EPERM 文件占用错误。
+    //await context.saveChat();
+    //serverDebug("[Sync] 删除完成并已保存");
+}
 //拖动插件的UI，小功能
 /**
  * 通用拖拽函数
