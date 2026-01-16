@@ -83,3 +83,67 @@
 .disconnect-btn:hover {
     background: #c0392b;
 }
+
+/* 设置界面样式 */
+#coop-settings {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #444;
+}
+
+#coop-settings h3 {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    color: #ccc;
+}
+
+#coop-infix-prompt {
+    width: 100%;
+    background: #111;
+    border: 1px solid #555;
+    color: white;
+    padding: 8px;
+    margin-bottom: 5px;
+    border-radius: 4px;
+    resize: vertical;
+    min-height: 60px;
+}
+
+.info-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    background: #3498db;
+    color: white;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 16px;
+    font-size: 12px;
+    cursor: help;
+    margin-left: 5px;
+    font-weight: bold;
+}
+
+.tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 8px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 10000;
+    max-width: 300px;
+    word-wrap: break-word;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+
+.tooltip::after {
+    content: "";
+    position: absolute;
+    top: -5px;
+    left: 20px;
+    border-width: 0 5px 5px 5px;
+    border-style: solid;
+    border-color: transparent transparent rgba(0, 0, 0, 0.8) transparent;
+}

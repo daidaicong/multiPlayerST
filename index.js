@@ -17,6 +17,11 @@ let isReady = false;
 let isGenerating = false;
 let myNickname = "";
 
+// 定义一个唯一的存储 Key
+const PROMPT_STORAGE_KEY = "coop_custom_fix_prompt"; 
+// 尝试读取，如果没有则默认为空字符串或你想要的默认值
+let g_fixAddPrompt = localStorage.getItem(PROMPT_STORAGE_KEY) || "";
+
 // 1. 初始化插件
 $(function () {
     // 加载配套 CSS
@@ -38,7 +43,7 @@ $(function () {
         myNickname = inputName;
         initWebSocket();
     });
-
+    //绑定离开按钮
     $(document).on('click', '#coop-disconnect-btn', function() {
         if(socket){
             try {
@@ -73,7 +78,15 @@ $(function () {
         // 恢复发送按钮背景色
         $("#send_but").css("background", "");
     });
-
+    // 绑定固定追加提示词输入进缓存
+    $(document).on('input', '#coop-infix-prompt', function() {
+        const newVal = $(this).val();
+        // 更新全局变量
+        g_fixAddPrompt = newVal;
+        // 存入浏览器本地存储
+        localStorage.setItem(PROMPT_STORAGE_KEY, newVal);
+        serverDebug("提示词已保存:" + newVal);
+    });
     // 监听角色和预设变化，仅对主机生效,后续可增加更多变化的监听
     {
         eventSource.on(event_types.CHAT_CHANGED, function() 
@@ -115,6 +128,13 @@ function injectHTML() {
             <div id="coop-room" style="display:none">
                 <div class="player-list" id="coop-player-list"></div>
                 <div id="coop-gen-info" style="font-size:10px; margin-top:8px; opacity:0.6"></div>
+
+                <!-- 新增设置界面 -->
+                <div id="coop-settings">
+                    <h3>设置 <span class="info-icon" title="追加提示词">?</span></h3>
+                    <textarea id="coop-infix-prompt" placeholder="输入后缀提示词...">${g_fixAddPrompt}</textarea>
+                </div>
+
                 <button id="coop-disconnect-btn" class="disconnect-btn">退出房间</button>
             </div>
         </div>
@@ -171,6 +191,8 @@ function initWebSocket() {
         saveChat();
     });
 }
+
+
 
 // 定义为命名函数，以便 removeEventListener 可以引用
 function coopClickHandler(e) {
@@ -233,8 +255,10 @@ function activateInterception() {
     
     //console.log("Coop interception activated (Capture Mode)");
 }
+
+
 /*获取房主前端当前角色卡，预设
- 通知房主的，房主才会调用
+ 通知房主的，房主才会调用,玩家调用不生效
  */
 function onRequestState()
 {
@@ -254,7 +278,8 @@ function onRequestState()
 // 消息处理
 function handleMasterSend(prompt) 
 {
-    $("#send_textarea").val(prompt).trigger("input");
+    //合并上Fix提示词
+    $("#send_textarea").val(prompt + "\n<extraPromot> " + g_fixAddPrompt + " \n</extraPromot>").trigger("input");
     $("#send_but").trigger("click"); // 触发 ST 原生发送
 
     let lastSentText = ""; // 记录上次发送的文本，避免重复发送
