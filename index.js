@@ -39,6 +39,41 @@ $(function () {
         initWebSocket();
     });
 
+    $(document).on('click', '#coop-disconnect-btn', function() {
+        if(socket){
+            try {
+                socket.disconnect();
+            } catch(e) {
+                serverDebug("Error disconnecting socket:" + e );
+            }
+        }
+        isReady = false;
+        isGenerating = false;
+        myNickname = "";
+
+        $('#coop-setup').show();    
+        $('#coop-room').hide();
+        $('#coop-indicator').text('🔴');
+        $('#coop-player-list').empty();
+        $('#coop-gen-info').text("");
+
+        // 恢复正常的发送按钮行为
+        const sendBtn = document.getElementById("send_but");
+        const textarea = document.getElementById("send_textarea");
+        if (sendBtn) {
+            sendBtn.removeEventListener("click", coopClickHandler, { capture: true });
+            // 恢复背景色
+            sendBtn.style.background = ""; 
+        }
+        if (textarea) {
+            textarea.removeEventListener("keydown", coopKeyHandler, { capture: true });
+        }
+        // 清空昵称输入框
+        $('#coop-name-input').val('');
+        // 恢复发送按钮背景色
+        $("#send_but").css("background", "");
+    });
+
     // 监听角色和预设变化，仅对主机生效,后续可增加更多变化的监听
     {
         eventSource.on(event_types.CHAT_CHANGED, function() 
@@ -80,6 +115,7 @@ function injectHTML() {
             <div id="coop-room" style="display:none">
                 <div class="player-list" id="coop-player-list"></div>
                 <div id="coop-gen-info" style="font-size:10px; margin-top:8px; opacity:0.6"></div>
+                <button id="coop-disconnect-btn" class="disconnect-btn">退出房间</button>
             </div>
         </div>
     `;
@@ -96,11 +132,10 @@ function initWebSocket() {
         $('#coop-setup').hide();
         $('#coop-room').show();
         $('#coop-indicator').text('🟢');
-        
         // 【核心】连接后激活拦截
         activateInterception();
-    });
-
+    },300);
+    
     socket.on("update_room", (data) => {
         isGenerating = data.isGenerating;
         const $list = $('#coop-player-list').empty();
@@ -137,16 +172,35 @@ function initWebSocket() {
     });
 }
 
-
-//只有房主会用到
-function activateInterception() {
+// 定义为命名函数，以便 removeEventListener 可以引用
+function coopClickHandler(e) {
     if (myNickname === MASTER_NICKNAME) return;
 
-    const $sendBtn = $("#send_but");
-    const $textarea = $("#send_textarea"); 
-    // 拦截按钮发送
-    $sendBtn.off("click").on("click", function (e) {
+    // 阻止事件继续传播，这样 ST 原生的 jQuery click 就永远收不到通知了
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    if (isGenerating) return;
+
+    const text = String($("#send_textarea").val() || "").trim();
+    if (!text && !isReady) return;
+
+    isReady = !isReady;
+    socket.emit("submit_ready", { text, isReady });
+    
+    // 更新 UI 状态
+    $("#send_but").css("background", isReady ? "rgba(0, 255, 0, 0.4)" : "");
+}
+
+function coopKeyHandler(e) {
+    if (myNickname === MASTER_NICKNAME) return;
+
+    // 检查是否是 Enter 且无修饰键
+    if (e.key === "Enter" && !e.ctrlKey && !e.shiftKey) {
+        // 同样使用捕获阶段拦截
         e.preventDefault();
+        e.stopPropagation();
         e.stopImmediatePropagation();
 
         if (isGenerating) return;
@@ -156,34 +210,37 @@ function activateInterception() {
 
         isReady = !isReady;
         socket.emit("submit_ready", { text, isReady });
-        $sendBtn.css("background", isReady ? "rgba(0, 255, 0, 0.4)" : "");
-    });
+        $("#send_but").css("background", isReady ? "rgba(0, 255, 0, 0.4)" : "");
+    }
+}
+// 拦截发送按钮和回车发送
+function activateInterception() {
+    if (myNickname === MASTER_NICKNAME) return;
+    if (!myNickname) return;
 
-    //  拦截回车发送
-    $textarea.off("keydown.coop").on("keydown.coop", function (e) {
-        // 检查是否是Enter键且没有按下Ctrl或Shift（SillyTavern通常是Ctrl+Enter换行）
-        if (e.key === "Enter" && !e.ctrlKey && !e.shiftKey) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
+    const sendBtn = document.getElementById("send_but");
+    const textarea = document.getElementById("send_textarea");
 
-            if (isGenerating) return;
-
-            const text = String($textarea.val() || "").trim();
-            if (!text && !isReady) return;
-
-            isReady = !isReady;
-            socket.emit("submit_ready", { text, isReady });
-            $sendBtn.css("background", isReady ? "rgba(0, 255, 0, 0.4)" : "");
-            
-            return false;
-        }
-    });
+    // 使用原生 addEventListener 并开启 capture: true
+    // 这保证了它在任何 jQuery 事件（冒泡阶段）之前触发
+    if (sendBtn) {
+        sendBtn.addEventListener("click", coopClickHandler, { capture: true });
+    }
+    
+    if (textarea) {
+        textarea.addEventListener("keydown", coopKeyHandler, { capture: true });
+    }
+    
+    //console.log("Coop interception activated (Capture Mode)");
 }
 /*获取房主前端当前角色卡，预设
  通知房主的，房主才会调用
  */
 function onRequestState()
 {
+    if(!myNickname) return;
+    if(myNickname !== MASTER_NICKNAME) return;
+
     const context = SillyTavern.getContext();
     const presetManager = context.getPresetManager();
     const state = {
@@ -193,8 +250,6 @@ function onRequestState()
     };
     socket.emit("sync_state", state);
 }
-
-
 
 // 消息处理
 function handleMasterSend(prompt) 
@@ -266,7 +321,7 @@ function onSyncMasterState(state)
     const context = SillyTavern.getContext();
     // 检查是否已经是该角色，避免重复加载
     serverDebug("test");
-    if (context.characterId !== state.characterId) {
+    if (context.characterId !== state.characterId && state.characterId) {
         context.selectCharacterById(state.characterId);
     }
     
