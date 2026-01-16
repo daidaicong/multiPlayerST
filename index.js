@@ -171,6 +171,7 @@ function initWebSocket() {
     {
         //serverDebug("触发发送消息"+myNickname + " : "+data);
         if (myNickname === MASTER_NICKNAME) {
+            onRequestMetadata();
             handleMasterSend(data);
         }
         else{
@@ -195,11 +196,15 @@ function initWebSocket() {
 
     socket.on("generation_finished", () => {
         isReady = false;
-        //eventSource.emit(event_types.MESSAGE_RECEIVED, chat.length-1, 'coop');
 
         $("#send_but").css("background", "");
-        if (myNickname !== MASTER_NICKNAME) $("#send_textarea").val("").trigger("input");
-        eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, chat.length - 1);
+        if (myNickname !== MASTER_NICKNAME) 
+        {
+            $("#send_textarea").val("").trigger("input");
+            serverDebug("KEHU生成结束");
+            eventSource.emit(event_types.MESSAGE_RECEIVED, chat.length - 1);
+            //eventSource.emit(event_types.GENERATION_ENDED);
+        }
         if(myNickname === MASTER_NICKNAME)
             saveChat();
     });
@@ -268,7 +273,18 @@ function activateInterception() {
     //console.log("Coop interception activated (Capture Mode)");
 }
 
+/*获取房主的metadata，
+ 通知房主的，房主才会调用,玩家调用不生效
+ */
+function onRequestMetadata()
+{
+    // if(!myNickname) return;
+    // if(myNickname !== MASTER_NICKNAME) return;
 
+    // const context = SillyTavern.getContext();
+    // //socket.emit("sync_metadata", context.chatMetadata);
+    // serverDebug("发送metadata: " + context.chatMetadata);
+}
 /*获取房主前端当前角色卡，预设
  通知房主的，房主才会调用,玩家调用不生效
  */
@@ -336,7 +352,8 @@ function renderStreamingMessage(data) {
         // 1. 更新内存数据
         const lastIdx = chat.length - 1;
         chat[lastIdx].mes = fullText;
-
+        chat[lastIdx].swipes[0] = fullText; // 【MVU修复】同步更新 swipe
+        chat[lastIdx].send_date = getNowStr();
         // 2. 更新 UI
         // 找到最后一条带 coop 标记的消息文本框
         const $targetMsg = $(".mes[data-coop-id='" + roundId + "']").find(".mes_text");
@@ -347,7 +364,7 @@ function renderStreamingMessage(data) {
             const characterName = characters[this_chid]?.name || "AI";
             const formattedContent = messageFormatting(fullText, characterName, false, false, lastIdx);
             $targetMsg.html(formattedContent);
-            eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, lastIdx);
+            //eventSource.emit(event_types.MESSAGE_UPDATED, lastIdx);
             // $targetMsg.text(fullText); 
         }
 
@@ -358,9 +375,13 @@ function renderStreamingMessage(data) {
         const characterName = characters[this_chid]?.name || "AI";
         const formattedContent = messageFormatting(fullText, characterName, false, false, chat.length);
         const aiMessage = {
-            name: characters[this_chid]?.name || "AI",
+            name: characterName,
             is_user: false,
-            mes: formattedContent,
+            is_system: false,
+            send_date: getNowStr(), // 【MVU修复】
+            mes: formattedContent, // 这里存格式化后的文本，但在 swipes 里通常存原始文本
+            swipes: [fullText],    // 【MVU修复】存原始文本
+            swipe_id: 0,
             extra: { 
                 is_coop: true, 
                 type: 'coop_ai_response' 
@@ -383,13 +404,16 @@ function renderSendMessage(data)
 {
     // 添加玩家联合输入的消息
     const playersPromot = data + "\n<extraPromot> " + g_fixAddPrompt + " \n</extraPromot>"
-    serverDebug("Hoke: " + playersPromot);
+    //serverDebug("Hoke: " + playersPromot);
     const combinedUserMessage = {
-        name: "Players",
+        name: "Players", // 如果想显示具体名字，需要从服务端传过来
         is_user: true,
+        is_system: false,
+        send_date: getNowStr(), // 【MVU修复】必须有时间
         mes: playersPromot,
-        extra: 
-        { 
+        swipes: [playersPromot], // 【MVU修复】swipes 数组用于支持多重回复
+        swipe_id: 0,
+        extra: { 
             is_coop: true, 
             type: 'coop_user_input' 
         }
@@ -504,4 +528,8 @@ function makeDraggable($panel, $handle) {
 function serverDebug(info)
 {
     socket.emit("debug", info);
+}
+// 获取当前时间戳的辅助函数
+function getNowStr() {
+    return new Date().toLocaleString();
 }
