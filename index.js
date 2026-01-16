@@ -203,7 +203,7 @@ function initWebSocket() {
             $("#send_textarea").val("").trigger("input");
             serverDebug("KEHU生成结束");
             eventSource.emit(event_types.MESSAGE_RECEIVED, chat.length - 1);
-            //eventSource.emit(event_types.GENERATION_ENDED);
+            eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED);
         }
         if(myNickname === MASTER_NICKNAME)
             saveChat();
